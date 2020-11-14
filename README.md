@@ -1,5 +1,4 @@
 This example demonstrates how to analyze adsdsd simple Java project with the Sonar Scanner.
-#Test
 
 Prerequisites
 =============
