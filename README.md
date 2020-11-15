@@ -1,5 +1,5 @@
 This example demonstrates how to analyze adsdsd simple Java project with the Sonar Scanner.
-#WebHookTest1
+#WebHookTest2
 
 Prerequisites
 =============
