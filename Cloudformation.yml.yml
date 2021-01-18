@@ -1,0 +1,307 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: VPC , Subnets , Internet gateway , NAT Gateway , EC2 Instance 
+
+Parameters:
+
+  DevelopmentVpcCidr:
+    Type: String
+    Default: 10.0.1.0/26
+
+  PublicSubnetCidr:
+    Type: String
+    Default: 10.0.1.32/28
+  
+  PrivateSubnetCidr:
+    Type: String
+    Default: 10.0.1.0/28
+
+  # SshCidrAllow: 
+  #   Type: String
+  #   Description: IP Address to allow ssh
+  #   MinLength: '9'
+  #   MaxLength: '18'
+  #   AllowedPattern: "(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})/(\\d{1,2})"
+
+  InstanceType:
+    Description: EC2 Instance Type 
+    Type: String
+    Default: t2.micro
+
+  LatestAmiId:
+    Description: AMI 
+    Type: String
+    Default: ami-0947d2ba12ee1ff75
+
+  
+    
+Resources:
+
+# EC2 Instance 
+
+  EC2Instance:
+     Type: AWS::EC2::Instance
+     Properties:
+       InstanceType: !Ref 'InstanceType'
+       SecurityGroupIds: [!Ref 'JenkinsSecurityGroup']
+      #  KeyName: !Ref 'KeyName'
+       ImageId: !Ref 'LatestAmiId'
+       IamInstanceProfile: !Ref 'InstanceProfile'
+       SubnetId: !Ref 'PrivateSubnet'
+
+  InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Path: /
+      Roles: [!Ref JenkinsRole]
+      InstanceProfileName: Jenkins-Role
+
+  JenkinsRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: Jenkins-Role
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ec2.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Path: /
+      Policies:
+        - PolicyName: s3
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                - s3:*
+                Resource:
+                - Fn::Join:
+                  - ''
+                  - - 'arn:aws:s3:::'
+                    - "*"
+        - PolicyName: logs
+          PolicyDocument:
+             Version: '2012-10-17'
+             Statement:
+              - Effect: Allow
+                Action:
+                - logs:CreateLogGroup
+                - logs:CreateLogStream
+                - logs:PutLogEvents
+                - logs:DescribeLogStreams
+                Resource:
+                - arn:aws:logs:*:*:*
+
+###########
+# VPC with Internet Gateway and NAT Gateway
+###########
+
+  DevelopmentVPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref DevelopmentVpcCidr
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: IFlow Product Development VPC
+
+  IGW:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: IFlow Product Development 
+  NAT:
+    Type: AWS::EC2::NatGateway
+    Properties: 
+      AllocationId:
+         Fn::GetAtt:
+         - EIP
+         - AllocationId
+      SubnetId:
+        Ref: PrivateSubnet
+      Tags:
+      - Key: Name
+        Value: NAT Gateway
+
+  EIP: 
+    DependsOn: DevelopmentVPC
+    Type: AWS::EC2::EIP
+    Properties: 
+       Domain: vpc
+
+    
+
+  VPCtoIGWConnection:
+    Type: AWS::EC2::VPCGatewayAttachment
+    DependsOn:
+      - IGW
+      - DevelopmentVPC
+    Properties:
+      InternetGatewayId: !Ref IGW
+      VpcId: !Ref DevelopmentVPC
+
+###########
+# Public Route Table
+###########
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    DependsOn: DevelopmentVPC
+    Properties:
+      VpcId: !Ref DevelopmentVPC
+      Tags:
+        - Key: Name
+          Value: Public Route Table
+
+  PublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn:
+      - PublicRouteTable
+      - IGW
+    Properties:
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref IGW
+      RouteTableId: !Ref PublicRouteTable
+
+###########
+# Private Route Table
+###########
+
+  PrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    DependsOn: DevelopmentVPC
+    Properties:
+      VpcId: !Ref DevelopmentVPC
+      Tags:
+        - Key: Name
+          Value: Private Route Table
+
+  PrivateRoute:
+    Type: AWS::EC2::Route
+    DependsOn:
+      - PrivateRouteTable
+      - NAT
+    Properties:
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId:
+         Ref: NAT
+      RouteTableId: !Ref PrivateRouteTable
+
+
+###########
+# Public Subnet
+###########
+
+  PublicSubnet:
+    Type: AWS::EC2::Subnet
+    DependsOn: DevelopmentVPC
+    Properties:
+      VpcId: !Ref DevelopmentVPC
+      MapPublicIpOnLaunch: true
+      CidrBlock: !Ref PublicSubnetCidr
+      AvailabilityZone: !Select 
+        - 0
+        - !GetAZs 
+          Ref: AWS::Region
+      Tags:
+        - Key: Name
+          Value: Public Subnet
+
+###########
+# Private Subnet
+###########
+
+  
+  PrivateSubnet:
+    Type: AWS::EC2::Subnet
+    DependsOn: DevelopmentVPC
+    Properties:
+      VpcId: !Ref DevelopmentVPC
+      CidrBlock: !Ref PrivateSubnetCidr
+      AvailabilityZone: !Select 
+        - 0
+        - !GetAZs 
+          Ref: AWS::Region
+      Tags:
+        - Key: Name
+          Value: Private Subnet
+     
+
+  PublicRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    DependsOn:
+      - PublicRouteTable
+      - PublicSubnet
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref PublicSubnet
+
+  PrivateRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    DependsOn:
+      - PrivateRouteTable
+      - PrivateSubnet
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable
+      SubnetId: !Ref PrivateSubnet
+
+###########
+# IAM Role for Instance
+###########
+
+  InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Path: /
+      Roles: [!Ref JenkinsRole]
+      InstanceProfileName: Jenkins-Role
+
+  JenkinsRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: Jenkins-Role
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ec2.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Path: /
+      Policies:
+        - PolicyName: root
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action: ssm:*
+                Resource: '*'
+ 
+
+###########
+# Jenkins Security Group
+###########
+
+  JenkinsSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    DependsOn: DevelopmentVPC
+    Properties:
+      GroupName: Jenkins
+      GroupDescription: Enable access to Jenkins
+      VpcId: !Ref DevelopmentVPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: Jenkins Security Group
+
