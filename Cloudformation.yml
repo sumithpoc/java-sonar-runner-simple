@@ -30,7 +30,27 @@ Parameters:
   LatestAmiId:
     Description: AMI 
     Type: String
-    Default: ami-0947d2ba12ee1ff75
+    Default: ami-047a51fa27710816e
+
+  EC2SSMManagedPolicy:
+    Type: String
+    Description: EC2SSMIAMManagedPolicyARN
+    Default:  arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+
+  CloudWatchAgentServerPolicy:
+    Type: String
+    Description: CloudWatchAgentServerPolicyARN
+    Default: arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy
+
+  # SecurityGroupID:
+  #   Type: "List<AWS::EC2::SecurityGroup::Id>"
+  #   Description: Securitygroup IDs
+
+  # AmazonEC2SSMPolicy:
+  #   Type: String
+  #   Description: AmazonEC2RoleforSSM
+  #   Default:  arn:aws:iam::aws:policy/service-role/AmazonEC2RoleforSSM
+
 
   
     
@@ -45,15 +65,60 @@ Resources:
        SecurityGroupIds: [!Ref 'JenkinsSecurityGroup']
       #  KeyName: !Ref 'KeyName'
        ImageId: !Ref 'LatestAmiId'
-       IamInstanceProfile: !Ref 'InstanceProfile'
+       IamInstanceProfile: !Ref 'Ec2SsmInstanceProfile'
        SubnetId: !Ref 'PrivateSubnet'
+       UserData: 
+          Fn::Base64: !Sub |
+             #!/bin/bash -xe 
+             sudo yum install -y https://s3.us-east-1.amazonaws.com/amazon-ssm-us-east-1/latest/linux_amd64/amazon-ssm-agent.rpm
+      #  enableDnsHostnames: true
+      #  enableDnsSupport: true
+       
+  VPCSystemManagerEndpoint:
+     Type: AWS::EC2::VPCEndpoint
+     Properties: 
+        PrivateDnsEnabled: true
+        ServiceName: 'com.amazonaws.us-east-1.ssm'
+        SecurityGroupIds: [!Ref 'JenkinsSecurityGroup']
+        SubnetIds: [!Ref 'PrivateSubnet']
+        VpcEndpointType: Interface
+        VpcId: !Ref DevelopmentVPC
 
-  InstanceProfile:
-    Type: AWS::IAM::InstanceProfile
-    Properties:
-      Path: /
-      Roles: [!Ref JenkinsRole]
-      InstanceProfileName: Jenkins-Role
+  EC2SystemManagerEndpoint:
+     Type: AWS::EC2::VPCEndpoint
+     Properties: 
+        PrivateDnsEnabled: true
+        ServiceName: 'com.amazonaws.us-east-1.ec2'
+        SecurityGroupIds: [!Ref 'JenkinsSecurityGroup']
+        SubnetIds: [!Ref 'PrivateSubnet']
+        VpcEndpointType: Interface
+        VpcId: !Ref DevelopmentVPC
+
+  
+
+  VPCEC2MessagesEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties: 
+        PrivateDnsEnabled: true
+        ServiceName: 'com.amazonaws.us-east-1.ec2messages'
+        SecurityGroupIds: [!Ref 'JenkinsSecurityGroup']
+        SubnetIds:  [!Ref 'PrivateSubnet']
+        VpcEndpointType: Interface
+        VpcId: !Ref DevelopmentVPC
+
+  VPCSSMMessagesEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties: 
+        PrivateDnsEnabled: true
+        ServiceName: 'com.amazonaws.us-east-1.ssmmessages'
+        SecurityGroupIds: [!Ref 'JenkinsSecurityGroup']
+        SubnetIds: [!Ref 'PrivateSubnet']
+        VpcEndpointType: Interface
+        VpcId: !Ref DevelopmentVPC
+
+     
+
+     
 
   JenkinsRole:
     Type: AWS::IAM::Role
@@ -62,38 +127,44 @@ Resources:
       AssumeRolePolicyDocument:
         Version: 2012-10-17
         Statement:
-          - Effect: Allow
-            Principal:
-              Service:
-                - ec2.amazonaws.com
-            Action:
-              - sts:AssumeRole
+        - Effect: Allow
+          Principal:
+            Service: 'ec2.amazonaws.com'
+          Action: 'sts:AssumeRole'
       Path: /
-      Policies:
-        - PolicyName: s3
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action:
-                - s3:*
-                Resource:
-                - Fn::Join:
-                  - ''
-                  - - 'arn:aws:s3:::'
-                    - "*"
-        - PolicyName: logs
-          PolicyDocument:
-             Version: '2012-10-17'
-             Statement:
-              - Effect: Allow
-                Action:
-                - logs:CreateLogGroup
-                - logs:CreateLogStream
-                - logs:PutLogEvents
-                - logs:DescribeLogStreams
-                Resource:
-                - arn:aws:logs:*:*:*
+      ManagedPolicyArns:
+        - !Ref EC2SSMManagedPolicy
+        - !Ref CloudWatchAgentServerPolicy
+
+  JenkinsPolicy:
+    Type: 'AWS::IAM::Policy'
+    Properties:
+      PolicyName: JenkinsPolicy
+      PolicyDocument:
+         Version: 2012-10-17
+         Statement:
+            - Effect: Allow
+              Action: 's3:GetObject'
+              Resource: 
+                - 'arn:aws:s3:::aws-ssm-us-east-1/*' 
+                - 'arn:aws:s3:::aws-windows-downloads-us-east-1/*'
+                - 'arn:aws:s3:::amazon-ssm-us-east-1/*'
+                - 'arn:aws:s3:::amazon-ssm-packages-us-east-1/*'
+                - 'arn:aws:s3:::us-east-1-birdwatcher-prod/*'
+                - 'arn:aws:s3:::aws-ssm-distributor-file-us-east-1/*'
+                - 'arn:aws:s3:::aws-ssm-document-attachments-us-east-1/*'
+                - 'arn:aws:s3:::patch-baseline-snapshot-us-east-1/*'
+      Roles:
+        - !Ref JenkinsRole
+       
+      
+  Ec2SsmInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties: 
+      Path: /
+      Roles: [!Ref JenkinsRole]
+
+     
 
 ###########
 # VPC with Internet Gateway and NAT Gateway
@@ -250,39 +321,8 @@ Resources:
       RouteTableId: !Ref PrivateRouteTable
       SubnetId: !Ref PrivateSubnet
 
-###########
-# IAM Role for Instance
-###########
 
-  InstanceProfile:
-    Type: AWS::IAM::InstanceProfile
-    Properties:
-      Path: /
-      Roles: [!Ref JenkinsRole]
-      InstanceProfileName: Jenkins-Role
 
-  JenkinsRole:
-    Type: AWS::IAM::Role
-    Properties:
-      RoleName: Jenkins-Role
-      AssumeRolePolicyDocument:
-        Version: 2012-10-17
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service:
-                - ec2.amazonaws.com
-            Action:
-              - sts:AssumeRole
-      Path: /
-      Policies:
-        - PolicyName: root
-          PolicyDocument:
-            Version: 2012-10-17
-            Statement:
-              - Effect: Allow
-                Action: ssm:*
-                Resource: '*'
  
 
 ###########
@@ -298,8 +338,8 @@ Resources:
       VpcId: !Ref DevelopmentVPC
       SecurityGroupIngress:
         - IpProtocol: tcp
-          FromPort: 80
-          ToPort: 80
+          FromPort: 443
+          ToPort: 443
           CidrIp: 0.0.0.0/0
       Tags:
         - Key: Name
