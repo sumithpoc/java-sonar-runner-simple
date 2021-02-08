@@ -2,36 +2,51 @@ AWSTemplateFormatVersion: 2010-09-09
 Description: VPC , Subnets , Internet gateway , NAT Gateway , EC2 Instance 
 
 Parameters:
+  EnvironmentName:
+    Description: An environment name that is prefixed to resource names
+    Type: String
+    Default: Development
 
   DevelopmentVpcCidr:
+    Description: IP range (CIDR notation) for this VPC
     Type: String
-    Default: 10.0.1.0/26
+    Default: 10.0.0.0/24
 
-  PublicSubnetCidr:
+  PublicSubnet1CIDR:
+    Description: IP range (CIDR notation) for the public subnet in the first Availability Zone
     Type: String
-    Default: 10.0.1.32/28
-  
-  PrivateSubnetCidr:
-    Type: String
-    Default: 10.0.1.0/28
+    Default: 10.0.0.0/26
 
-  # SshCidrAllow: 
-  #   Type: String
-  #   Description: IP Address to allow ssh
-  #   MinLength: '9'
-  #   MaxLength: '18'
-  #   AllowedPattern: "(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})/(\\d{1,2})"
+  PublicSubnet2CIDR:
+    Description: IP range (CIDR notation) for the public subnet in the second Availability Zone
+    Type: String
+    Default: 10.0.0.64/26
+
+  PrivateSubnet1CIDR:
+    Description: IP range (CIDR notation) for the private subnet in the first Availability Zone
+    Type: String
+    Default: 10.0.0.128/26
+
+  PrivateSubnet2CIDR:
+    Description: IP range (CIDR notation) for the private subnet in the second Availability Zone
+    Type: String
+    Default: 10.0.0.192/26
 
   InstanceType:
-    Description: EC2 Instance Type 
+    Description: Jenkins EC2 Instance Type 
     Type: String
     Default: t2.micro
+
+  # SonarInstanceType:
+  #   Description: Sonar EC2 Instance Type 
+  #   Type: String
+  #   Default: t2.micro
 
   LatestAmiId:
     Description: AMI 
     Type: String
     Default: ami-047a51fa27710816e
-
+    
   EC2SSMManagedPolicy:
     Type: String
     Description: EC2SSMIAMManagedPolicyARN
@@ -41,38 +56,116 @@ Parameters:
     Type: String
     Description: CloudWatchAgentServerPolicyARN
     Default: arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy
-
-  # SecurityGroupID:
-  #   Type: "List<AWS::EC2::SecurityGroup::Id>"
-  #   Description: Securitygroup IDs
-
-  # AmazonEC2SSMPolicy:
-  #   Type: String
-  #   Description: AmazonEC2RoleforSSM
-  #   Default:  arn:aws:iam::aws:policy/service-role/AmazonEC2RoleforSSM
-
+  
+Resources:
+  ElasticLoadBalancer:
+    Type: 'AWS::ElasticLoadBalancing::LoadBalancer'
+    Properties:
+      LoadBalancerName: DevelopmentElasticLoadBalancer
+      Instances:
+        - !Ref EC2Instance1
+        - !Ref EC2Instance2
+      Listeners: 
+      - InstancePort: 443
+        InstanceProtocol: HTTPS
+        LoadBalancerPort: 80
+        Protocol: HTTP
+      Subnets: 
+        - !Ref PublicSubnet1
+        - !Ref PublicSubnet2
+      SecurityGroups: 
+        - !Ref LoadBalancerSecurityGroup
+      HealthCheck:
+        HealthyThreshold: 10
+        Interval: 300
+        Target: TCP:80
+        Timeout: 5
+        UnhealthyThreshold: 2
+      Tags: 
+        - Key: Name
+          Value: Development
 
   
+
+  # LoadBalancerListener2:
+  #   Type: AWS::ElasticLoadBalancing::LoadBalancer Listeners
+  #   Properties:
+  #     InstancePort: 
+  #     InstanceProtocol:
+  #     LoadBalancerPort:
+  #     PolicyNames:
+  #       - 
+  #     Protocol:
+  #     SSLCertificateId: 
+
+
+
     
-Resources:
+
+  LoadBalancerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: LoadBalancerSecurityGroup
+      GroupDescription: Enable access to LoadBalancer
+      VpcId: !Ref DevelopmentVPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: LoadBalancer Security Group
+   
+    
+  # TargetGroup:
+  #   Type: AWS::ElasticLoadBalancingV2::TargetGroup
+  #   Properties:
+  #     VpcId: !Ref DevelopmentVPC
+  #     Port: 80
+  #     Protocol: HTTP
+  #     TargetType: ip
+  #     Matcher: 
+  #       HttpCode: 200
+  #     HealthCheckIntervalSeconds: 10
+  #     HealthCheckPath: /health/check
+  #     HealthCheckProtocol: HTTP
+  #     HealthCheckTimeoutSeconds: 5
+  #     HealthyThresholdCount: 2
+  #     UnhealthyThresholdCount: 2
 
 # EC2 Instance 
 
-  EC2Instance:
+  EC2Instance1:
      Type: AWS::EC2::Instance
      Properties:
        InstanceType: !Ref 'InstanceType'
        SecurityGroupIds: [!Ref 'JenkinsSecurityGroup']
-      #  KeyName: !Ref 'KeyName'
        ImageId: !Ref 'LatestAmiId'
        IamInstanceProfile: !Ref 'Ec2SsmInstanceProfile'
-       SubnetId: !Ref 'PrivateSubnet'
+       SubnetId: !Ref PrivateSubnet1
        UserData: 
           Fn::Base64: !Sub |
              #!/bin/bash -xe 
              sudo yum install -y https://s3.us-east-1.amazonaws.com/amazon-ssm-us-east-1/latest/linux_amd64/amazon-ssm-agent.rpm
-      #  enableDnsHostnames: true
-      #  enableDnsSupport: true
+            
+  EC2Instance2:
+     Type: AWS::EC2::Instance
+     Properties:
+       InstanceType: !Ref 'InstanceType'
+       SecurityGroupIds: [!Ref 'JenkinsSecurityGroup']
+       ImageId: !Ref 'LatestAmiId'
+       IamInstanceProfile: !Ref 'Ec2SsmInstanceProfile'
+       SubnetId: !Ref PrivateSubnet2
+       UserData: 
+          Fn::Base64: !Sub |
+             #!/bin/bash -xe 
+             sudo yum install -y https://s3.us-east-1.amazonaws.com/amazon-ssm-us-east-1/latest/linux_amd64/amazon-ssm-agent.rpm
+     
        
   VPCSystemManagerEndpoint:
      Type: AWS::EC2::VPCEndpoint
@@ -80,7 +173,9 @@ Resources:
         PrivateDnsEnabled: true
         ServiceName: 'com.amazonaws.us-east-1.ssm'
         SecurityGroupIds: [!Ref 'JenkinsSecurityGroup']
-        SubnetIds: [!Ref 'PrivateSubnet']
+        SubnetIds: 
+          -  !Ref PrivateSubnet1
+          -  !Ref PrivateSubnet2
         VpcEndpointType: Interface
         VpcId: !Ref DevelopmentVPC
 
@@ -90,7 +185,9 @@ Resources:
         PrivateDnsEnabled: true
         ServiceName: 'com.amazonaws.us-east-1.ec2'
         SecurityGroupIds: [!Ref 'JenkinsSecurityGroup']
-        SubnetIds: [!Ref 'PrivateSubnet']
+        SubnetIds: 
+          -  !Ref PrivateSubnet1
+          -  !Ref PrivateSubnet2
         VpcEndpointType: Interface
         VpcId: !Ref DevelopmentVPC
 
@@ -102,7 +199,9 @@ Resources:
         PrivateDnsEnabled: true
         ServiceName: 'com.amazonaws.us-east-1.ec2messages'
         SecurityGroupIds: [!Ref 'JenkinsSecurityGroup']
-        SubnetIds:  [!Ref 'PrivateSubnet']
+        SubnetIds: 
+          - !Ref PrivateSubnet1
+          - !Ref PrivateSubnet2
         VpcEndpointType: Interface
         VpcId: !Ref DevelopmentVPC
 
@@ -112,7 +211,9 @@ Resources:
         PrivateDnsEnabled: true
         ServiceName: 'com.amazonaws.us-east-1.ssmmessages'
         SecurityGroupIds: [!Ref 'JenkinsSecurityGroup']
-        SubnetIds: [!Ref 'PrivateSubnet']
+        SubnetIds: 
+          - !Ref PrivateSubnet1
+          - !Ref PrivateSubnet2
         VpcEndpointType: Interface
         VpcId: !Ref DevelopmentVPC
 
@@ -178,43 +279,113 @@ Resources:
       EnableDnsHostnames: true
       Tags:
         - Key: Name
-          Value: IFlow Product Development VPC
+          Value: !Ref EnvironmentName
 
-  IGW:
+  InternetGateway:
     Type: AWS::EC2::InternetGateway
     Properties:
       Tags:
         - Key: Name
-          Value: IFlow Product Development 
-  NAT:
-    Type: AWS::EC2::NatGateway
-    Properties: 
-      AllocationId:
-         Fn::GetAtt:
-         - EIP
-         - AllocationId
-      SubnetId:
-        Ref: PrivateSubnet
-      Tags:
-      - Key: Name
-        Value: NAT Gateway
+          Value: !Ref EnvironmentName 
 
-  EIP: 
+  InternetGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      InternetGatewayId: !Ref InternetGateway
+      VpcId: !Ref DevelopmentVPC
+
+
+  ###########
+  # Public Subnet
+  ###########
+
+  PublicSubnet1:
+    Type: AWS::EC2::Subnet
     DependsOn: DevelopmentVPC
+    Properties:
+      VpcId: !Ref DevelopmentVPC
+      MapPublicIpOnLaunch: true
+      CidrBlock: !Ref PublicSubnet1CIDR
+      AvailabilityZone: !Select  [0, !GetAZs '']
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName} Public Subnet (AZ1)
+
+  PublicSubnet2:
+    Type: AWS::EC2::Subnet
+    DependsOn: DevelopmentVPC
+    Properties:
+      VpcId: !Ref DevelopmentVPC
+      MapPublicIpOnLaunch: true
+      CidrBlock: !Ref PublicSubnet2CIDR
+      AvailabilityZone: !Select  [1, !GetAZs '']
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName} Public Subnet (AZ2)
+
+  PrivateSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref DevelopmentVPC
+      AvailabilityZone: !Select [ 0, !GetAZs  '' ]
+      CidrBlock: !Ref PrivateSubnet1CIDR
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName} Private Subnet (AZ1)
+
+
+  PrivateSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref DevelopmentVPC
+      AvailabilityZone: !Select [ 1, !GetAZs  '' ]
+      CidrBlock: !Ref PrivateSubnet2CIDR
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName} Private Subnet (AZ2)
+
+  
+  NatGateway1EIP: 
+    DependsOn: InternetGatewayAttachment
     Type: AWS::EC2::EIP
     Properties: 
        Domain: vpc
 
-    
+  NatGateway2EIP: 
+    DependsOn: InternetGatewayAttachment
+    Type: AWS::EC2::EIP
+    Properties: 
+       Domain: vpc
 
-  VPCtoIGWConnection:
-    Type: AWS::EC2::VPCGatewayAttachment
-    DependsOn:
-      - IGW
-      - DevelopmentVPC
-    Properties:
-      InternetGatewayId: !Ref IGW
-      VpcId: !Ref DevelopmentVPC
+  NatGateway1:
+    Type: AWS::EC2::NatGateway
+    Properties: 
+      AllocationId:
+         Fn::GetAtt:
+         - NatGateway1EIP
+         - AllocationId
+      SubnetId:
+        Ref: PublicSubnet1
+      Tags:
+      - Key: Name
+        Value: !Sub ${EnvironmentName} Nat Gateway (AZ1)
+
+  NatGateway2:
+    Type: AWS::EC2::NatGateway
+    Properties: 
+      AllocationId:
+         Fn::GetAtt:
+         - NatGateway2EIP
+         - AllocationId
+      SubnetId:
+        Ref: PublicSubnet2
+      Tags:
+      - Key: Name
+        Value: !Sub ${EnvironmentName} Nat Gateway (AZ2)
+
+
 
 ###########
 # Public Route Table
@@ -227,103 +398,79 @@ Resources:
       VpcId: !Ref DevelopmentVPC
       Tags:
         - Key: Name
-          Value: Public Route Table
+          Value: !Sub ${EnvironmentName} Public Routes
 
-  PublicRoute:
+  DefaultPublicRoute:
     Type: AWS::EC2::Route
-    DependsOn:
-      - PublicRouteTable
-      - IGW
+    DependsOn: InternetGatewayAttachment
     Properties:
       DestinationCidrBlock: 0.0.0.0/0
-      GatewayId: !Ref IGW
+      GatewayId: !Ref InternetGateway
       RouteTableId: !Ref PublicRouteTable
+
+  PublicSubnet1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref PublicSubnet1
+
+  PublicSubnet2RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref PublicSubnet2
+
 
 ###########
 # Private Route Table
 ###########
 
-  PrivateRouteTable:
+  PrivateRouteTable1:
     Type: AWS::EC2::RouteTable
     DependsOn: DevelopmentVPC
     Properties:
       VpcId: !Ref DevelopmentVPC
       Tags:
         - Key: Name
-          Value: Private Route Table
+          Value: !Sub ${EnvironmentName} Private Routes (AZ1)
 
-  PrivateRoute:
+  DefaultPrivateRoute1:
     Type: AWS::EC2::Route
-    DependsOn:
-      - PrivateRouteTable
-      - NAT
     Properties:
       DestinationCidrBlock: 0.0.0.0/0
       NatGatewayId:
-         Ref: NAT
-      RouteTableId: !Ref PrivateRouteTable
+         Ref: NatGateway1
+      RouteTableId: !Ref PrivateRouteTable1
 
+  PrivateSubnet1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable1
+      SubnetId: !Ref PrivateSubnet1
 
-###########
-# Public Subnet
-###########
-
-  PublicSubnet:
-    Type: AWS::EC2::Subnet
+  PrivateRouteTable2:
+    Type: AWS::EC2::RouteTable
     DependsOn: DevelopmentVPC
     Properties:
       VpcId: !Ref DevelopmentVPC
-      MapPublicIpOnLaunch: true
-      CidrBlock: !Ref PublicSubnetCidr
-      AvailabilityZone: !Select 
-        - 0
-        - !GetAZs 
-          Ref: AWS::Region
       Tags:
         - Key: Name
-          Value: Public Subnet
+          Value: !Sub ${EnvironmentName} Private Routes (AZ2)
 
-###########
-# Private Subnet
-###########
-
-  
-  PrivateSubnet:
-    Type: AWS::EC2::Subnet
-    DependsOn: DevelopmentVPC
+  DefaultPrivateRoute2:
+    Type: AWS::EC2::Route
     Properties:
-      VpcId: !Ref DevelopmentVPC
-      CidrBlock: !Ref PrivateSubnetCidr
-      AvailabilityZone: !Select 
-        - 0
-        - !GetAZs 
-          Ref: AWS::Region
-      Tags:
-        - Key: Name
-          Value: Private Subnet
-     
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId:
+         Ref: NatGateway2
+      RouteTableId: !Ref PrivateRouteTable2
 
-  PublicRouteTableAssociation:
+  PrivateSubnet2RouteTableAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
-    DependsOn:
-      - PublicRouteTable
-      - PublicSubnet
     Properties:
-      RouteTableId: !Ref PublicRouteTable
-      SubnetId: !Ref PublicSubnet
+      RouteTableId: !Ref PrivateRouteTable2
+      SubnetId: !Ref PrivateSubnet2
 
-  PrivateRouteTableAssociation:
-    Type: AWS::EC2::SubnetRouteTableAssociation
-    DependsOn:
-      - PrivateRouteTable
-      - PrivateSubnet
-    Properties:
-      RouteTableId: !Ref PrivateRouteTable
-      SubnetId: !Ref PrivateSubnet
-
-
-
- 
 
 ###########
 # Jenkins Security Group
@@ -344,4 +491,7 @@ Resources:
       Tags:
         - Key: Name
           Value: Jenkins Security Group
+
+
+
 
