@@ -70,6 +70,11 @@ Resources:
         InstanceProtocol: HTTPS
         LoadBalancerPort: 80
         Protocol: HTTP
+      - InstancePort: 443
+        InstanceProtocol: HTTPS
+        LoadBalancerPort: 443
+        Protocol: HTTPS
+        SSLCertificateId: arn:aws:acm:us-east-1:320696089175:certificate/ae017933-44ea-4ab7-99ba-29a0d577e3d5
       Subnets: 
         - !Ref PublicSubnet1
         - !Ref PublicSubnet2
@@ -117,6 +122,10 @@ Resources:
           FromPort: 443
           ToPort: 443
           CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 8080
+          ToPort: 8080
+          CidrIp: 0.0.0.0/0
       Tags:
         - Key: Name
           Value: LoadBalancer Security Group
@@ -142,29 +151,137 @@ Resources:
 
   EC2Instance1:
      Type: AWS::EC2::Instance
+     Metadata:
+       AWS::CloudFormation::Init:
+         config:
+           packages:
+             yum:
+               httpd: []
+               java-1.7.0-openjdk-devel: []
+            
+    #  Metadata:
+    #     AWS::Cloudformation::Init:
+    #       configSets:
+    #         default: [config , jenkinsConfig]
+    #       jenkinsConfig:
+    #         packages:
+    #           yum:
+    #              wget: []
+    #           java-1.8.0-openjdk: []
+    #           java-1.8.0-openjdk-devel: []
+    #           net-tools: []
+    #           git: []
+    #           jq: []
+    #       commands:
+    #         01_epel_repo:
+    #           command: sudo rpm -ivh https://dl.fedoraproject.org/pub/epel/epel-release-latest-7.noarch.rpm
+    #         02_jenkins_repo:
+    #           command: sudo wget -O /etc/yum.repos.d/jenkins.repo http://pkg.jenkins-ci.org/redhat/jenkins.repo
+    #         03_yum_clean:
+    #           command: yum clean all
+    #         04_jenkins_key:
+    #           command: sudo rpm --import https://jenkins-ci.org/redhat/jenkins-ci.org.key
+    #         05_jenkins_dirs:
+    #           command: sudo mkdir -p /home/jenkins /var/lib/jenkins/.ssh /var/cache/jenkins/war /var/log/jenkins
+    #         06_jenkins_install:
+    #           command: sudo yum install -y jenkins
+    #         07_check_jenkins_login:
+    #           command: usermod -s /bin/bash jenkins
+    #         08_set_jenkins_port:
+    #           command: !Sub |
+    #             sudo sed -i "s/JENKINS_PORT=\"8080\"/JENKINS_PORT=\"8080\"/g" /etc/sysconfig/jenkins
+    #         09_sshconfig:
+    #           command: sudo echo -e "Host *\n\tStrictHostKeyChecking no\n" >> /var/lib/jenkins/.ssh/config
+    #         10_ssh_keygen:
+    #           command: sudo ssh-keygen -t rsa -b 2048 -C jenkins@jenkins -N "" -f /var/lib/jenkins/.ssh/id_rsa; sudo cat /var/lib/jenkins/.ssh/id_rsa.pub > /var/lib/jenkins/.ssh/authorized_keys
+    #         11_set_permissions:
+    #           command: sudo chown -R jenkins:jenkins /home/jenkins /var/lib/jenkins /var/cache/jenkins /var/log/jenkins; sudo chmod 0700 /var/lib/jenkins/.ssh; sudo chmod 0600 /var/lib/jenkins/.ssh/*
+    #         12_firewall:
+    #           command: !Sub |
+    #             sudo firewall-cmd --permanent --add-service=ssh; sudo firewall-cmd --permanent --add-port='8080'/tcp; sudo firewall-cmd --reload
+    #       services:
+    #         sysvinit:
+    #           jenkins:
+    #             enabled: true
+    #             ensureRunning: true
+
+    #     # Default Config, which handles installing the firewall, and CFN components to talk back to CloudFormation
+    #     config:
+    #       packages:
+    #         yum:
+    #           firewalld: []
+    #       commands:
+    #         01_update:
+    #           command: yum -y update
+    #       files:
+    #         '/etc/cfn/cfn-hup.conf':
+    #           content: !Sub |
+    #             [main]
+    #             stack=${AWS::StackId}
+    #             region=${AWS::Region}
+    #             interval=1
+    #           mode: '000400'
+    #           owner: root
+    #           group: root
+    #         '/etc/cfn/hooks.d/cfn-auto-reloader.conf':
+    #           content: !Sub |
+    #             [cfn-auto-reloader-hook]
+    #             triggers=post.update
+    #             path=Resources.JenkinsInstance.Metadata.AWS::CloudFormation::Init
+    #             action=/opt/aws/bin/cfn-init --verbose --stack=${AWS::StackName} --region=${AWS::Region} --resource=JenkinsInstance
+    #             runas=root
+    #       services:
+    #         sysvinit:
+    #           cfn-hup:
+    #             enabled: true
+    #             ensureRunning: true
+    #             files:
+    #               - '/etc/cfn/cfn-hup.conf'
+    #               - '/etc/cfn/hooks.d/cfn-auto-reloader.conf'
+    #           firewalld:
+    #             enabled: true
+    #             ensureRunning: true
+
      Properties:
        InstanceType: !Ref 'InstanceType'
        SecurityGroupIds: [!Ref 'JenkinsSecurityGroup']
        ImageId: !Ref 'LatestAmiId'
        IamInstanceProfile: !Ref 'Ec2SsmInstanceProfile'
        SubnetId: !Ref PrivateSubnet1
+       KeyName: JenkinsKey
        UserData: 
           Fn::Base64: !Sub |
              #!/bin/bash -xe 
              sudo yum install -y https://s3.us-east-1.amazonaws.com/amazon-ssm-us-east-1/latest/linux_amd64/amazon-ssm-agent.rpm
+            #  sudo yum update -y
+            #  sudo yum install -y java-1.8.0-openjdk-devel
+            #  /opt/aws/bin/cfn-init -v --stack ${AWS::StackName} --resource JenkinsInstance --region ${AWS::Region}
+            #  /opt/aws/bin/cfn-signal -e $? --region ${AWS::Region} --stack ${AWS::StackName} --resource JenkinsInstance
             
   EC2Instance2:
      Type: AWS::EC2::Instance
+     Metadata:
+       AWS::CloudFormation::Init:
+         config:
+           packages:
+             yum:
+               httpd: []
+               java-1.7.0-openjdk-devel: []
      Properties:
        InstanceType: !Ref 'InstanceType'
        SecurityGroupIds: [!Ref 'JenkinsSecurityGroup']
        ImageId: !Ref 'LatestAmiId'
        IamInstanceProfile: !Ref 'Ec2SsmInstanceProfile'
        SubnetId: !Ref PrivateSubnet2
+       KeyName: JenkinsKey
        UserData: 
           Fn::Base64: !Sub |
              #!/bin/bash -xe 
              sudo yum install -y https://s3.us-east-1.amazonaws.com/amazon-ssm-us-east-1/latest/linux_amd64/amazon-ssm-agent.rpm
+            #  sudo yum update -y
+            #  sudo yum install -y java-1.8.0-openjdk-devel
+  #            /opt/aws/bin/cfn-init -v --stack ${AWS::StackName} --resource JenkinsInstance --region ${AWS::Region}
+  #            /opt/aws/bin/cfn-signal -e $? --region ${AWS::Region} --stack ${AWS::StackName} --resource JenkinsInstance
      
        
   VPCSystemManagerEndpoint:
@@ -172,19 +289,38 @@ Resources:
      Properties: 
         PrivateDnsEnabled: true
         ServiceName: 'com.amazonaws.us-east-1.ssm'
-        SecurityGroupIds: [!Ref 'JenkinsSecurityGroup']
+        SecurityGroupIds: [!Ref 'VPCEndpointSecurityGroup']
         SubnetIds: 
           -  !Ref PrivateSubnet1
           -  !Ref PrivateSubnet2
         VpcEndpointType: Interface
         VpcId: !Ref DevelopmentVPC
 
+  VPCEndpointSecurityGroup:
+      Type: AWS::EC2::SecurityGroup
+      DependsOn: DevelopmentVPC
+      Properties:
+        GroupDescription: Enable access to VPC Endpoints
+        VpcId: !Ref DevelopmentVPC
+        SecurityGroupIngress:
+          - IpProtocol: tcp
+            FromPort: 443
+            ToPort: 443
+            SourceSecurityGroupId: !Ref JenkinsSecurityGroup
+        SecurityGroupEgress:
+          - IpProtocol: tcp
+            FromPort: 443
+            ToPort: 443
+            CidrIp: 0.0.0.0/0
+         
+     
+
   EC2SystemManagerEndpoint:
      Type: AWS::EC2::VPCEndpoint
      Properties: 
         PrivateDnsEnabled: true
         ServiceName: 'com.amazonaws.us-east-1.ec2'
-        SecurityGroupIds: [!Ref 'JenkinsSecurityGroup']
+        SecurityGroupIds: [!Ref 'VPCEndpointSecurityGroup']
         SubnetIds: 
           -  !Ref PrivateSubnet1
           -  !Ref PrivateSubnet2
@@ -198,7 +334,7 @@ Resources:
     Properties: 
         PrivateDnsEnabled: true
         ServiceName: 'com.amazonaws.us-east-1.ec2messages'
-        SecurityGroupIds: [!Ref 'JenkinsSecurityGroup']
+        SecurityGroupIds: [!Ref 'VPCEndpointSecurityGroup']
         SubnetIds: 
           - !Ref PrivateSubnet1
           - !Ref PrivateSubnet2
@@ -210,7 +346,7 @@ Resources:
     Properties: 
         PrivateDnsEnabled: true
         ServiceName: 'com.amazonaws.us-east-1.ssmmessages'
-        SecurityGroupIds: [!Ref 'JenkinsSecurityGroup']
+        SecurityGroupIds: [!Ref 'VPCEndpointSecurityGroup']
         SubnetIds: 
           - !Ref PrivateSubnet1
           - !Ref PrivateSubnet2
@@ -487,7 +623,15 @@ Resources:
         - IpProtocol: tcp
           FromPort: 443
           ToPort: 443
-          CidrIp: 0.0.0.0/0
+          SourceSecurityGroupId: !Ref LoadBalancerSecurityGroup
+        - IpProtocol: tcp
+          FromPort: 8080
+          ToPort: 8080
+          SourceSecurityGroupId: !Ref LoadBalancerSecurityGroup
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          SourceSecurityGroupId: !Ref LoadBalancerSecurityGroup
       Tags:
         - Key: Name
           Value: Jenkins Security Group
